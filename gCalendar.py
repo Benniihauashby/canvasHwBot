@@ -1,7 +1,7 @@
-import datetime
 import json
 import os.path
 import sys
+from datetime import datetime, timezone
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -34,6 +34,24 @@ def get_calendar_service():
             token.write(creds.to_json())
 
     return build("calendar", "v3", credentials=creds)
+
+
+def is_past_due(due_date_str):
+    """Return True if the due date is earlier than right now.
+
+    Canvas (and our Mockoon mock) returns ISO 8601 strings.
+    We normalize 'Z' to +00:00, parse with fromisoformat(), and assume
+    UTC if no timezone is present.  This lets us compare cleanly against
+    datetime.now(timezone.utc) without worrying about DST.
+    """
+    if not due_date_str:
+        return True
+    if due_date_str.endswith("Z"):
+        due_date_str = due_date_str[:-1] + "+00:00"
+    due = datetime.fromisoformat(due_date_str)
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    return due < datetime.now(timezone.utc)
 
 
 def load_assignments_from_file(file_path):
@@ -115,8 +133,14 @@ def main():
     service = get_calendar_service()
     assignments = load_assignments_from_file(temp_path)
 
-    print(f"Found {len(assignments)} assignments to sync...")
-    for assignment in assignments:
+    # Feature 2: silently drop any assignment whose due date has already passed.
+    # This keeps the calendar clean and avoids cluttering it with stale deadlines.
+    future_assignments = [
+        a for a in assignments if not is_past_due(a.get("due_date", ""))
+    ]
+
+    print(f"Found {len(future_assignments)} future assignment(s) to sync...")
+    for assignment in future_assignments:
         add_assignment_to_calendar(service, assignment)
 
 

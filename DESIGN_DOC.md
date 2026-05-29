@@ -19,6 +19,7 @@
 import sys          # System-specific parameters (used for command-line args)
 import os           # Operating system interface (used for file path checks)
 import json         # JSON encoder/decoder (for reading the temp file)
+from datetime import datetime, timezone  # Feature 2: date parsing and UTC comparison
 
 # Google API libraries — these handle the heavy lifting of OAuth and HTTP
 from google.auth.transport.requests import Request        # HTTP request handler for token refresh
@@ -162,20 +163,27 @@ def create_calendar_event(service, assignment):
     # -------------------------------------------------------------------------
     # STEP B: Construct the Google Calendar event object
     # -------------------------------------------------------------------------
-    # Google Calendar expects ISO 8601 datetime strings (e.g., "2026-05-30T23:59:00Z")
-    # The 'Z' suffix indicates UTC time zone.
+    # Google Calendar expects ISO 8601 datetime strings.
+    # Mockoon returns UTC times (e.g., "2026-05-30T23:59:00Z").  If we pass them
+    # straight through with timeZone="UTC", the calendar converts to local time
+    # and shows 4:59 PM Pacific.  We strip the 'Z' suffix and set the timezone
+    # to America/Los_Angeles so the wall-clock time matches the local deadline.
+    due_raw = due_date
+    if due_raw.endswith("Z"):
+        due_raw = due_raw[:-1]
+
     event = {
         "summary": title,                    # What appears on the calendar grid
         "description": full_description,       # What you see when you open the event
         "start": {
-            "dateTime": due_date,            # Due date = event start time
-            "timeZone": "UTC",               # Explicitly set to UTC to match Mockoon format
+            "dateTime": due_raw,             # Due date = event start time
+            "timeZone": "America/Los_Angeles",
         },
         "end": {
-            "dateTime": due_date,            # For deadlines, start and end are the same
-            "timeZone": "UTC",
+            "dateTime": due_raw,             # For deadlines, start and end are the same
+            "timeZone": "America/Los_Angeles",
         },
-        # For Feature 1, we skip reminders. Feature 4 will add:
+        # Feature 4 will add reminders here:
         # "reminders": { "useDefault": False, "overrides": [...] }
     }
 
@@ -234,7 +242,7 @@ if __name__ == "__main__":
 
     try:
         with open(input_file, "r") as f:
-            assignment = json.load(f)  # json.load() parses a file object directly
+            assignments = json.load(f)  # C++ writes a JSON array
     except json.JSONDecodeError as e:
         print(f"[Python] ERROR: Invalid JSON in input file: {e}")
         sys.exit(1)
@@ -242,7 +250,7 @@ if __name__ == "__main__":
         print(f"[Python] ERROR: Could not read file: {e}")
         sys.exit(1)
 
-    print(f"[Python] Loaded assignment: {assignment.get('name', 'Unknown')}")
+    print(f"[Python] Loaded {len(assignments)} assignment(s) from temp file")
 
     # -------------------------------------------------------------------------
     # STEP 3: Authenticate with Google Calendar API
@@ -255,14 +263,76 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # -------------------------------------------------------------------------
-    # STEP 4: Create the calendar event
+    # STEP 4: Create calendar events (Feature 2 filtering applied below)
     # -------------------------------------------------------------------------
-    success = create_calendar_event(service, assignment)
+    success_count = 0
+    for assignment in assignments:
+        if create_calendar_event(service, assignment):
+            success_count += 1
 
     # -------------------------------------------------------------------------
     # STEP 5: Exit with appropriate code so C++ knows what happened
     # -------------------------------------------------------------------------
-    if success:
-        sys.exit(0)  # Zero = success
-    else:
-        sys.exit(2)  # Non-zero = failure (we use 2 to distinguish from arg errors)
+    print(f"[Python] Successfully created {success_count}/{len(assignments)} events")
+    sys.exit(0 if success_count == len(assignments) else 2)
+# =============================================================================
+# Feature 2: Filter Out Past-Due Assignments
+# =============================================================================
+#
+# Motivation:
+#   Running the sync tool daily should not clutter the calendar with deadlines
+#   that have already passed.  We only want future events.
+#
+# Design Decision:
+#   The filtering lives in Python (not C++) because:
+#   - Python has excellent built-in datetime parsing (datetime.fromisoformat)
+#   - It avoids adding heavy date-math code to the C++ side
+#   - The temp file remains a complete snapshot; Python decides what to sync
+#
+# Implementation:
+#   1. Parse the assignment's due_at string (ISO 8601, possibly ending in 'Z')
+#   2. Normalize 'Z' to +00:00 so fromisoformat() accepts it
+#   3. If the string has no timezone info, assume UTC (Canvas API default)
+#   4. Compare against datetime.now(timezone.utc)
+#   5. Silently skip anything whose due date is in the past
+#
+# Why silently?
+#   The user (student) does not need a verbose log of skipped old assignments.
+#   A single count line ("3 future assignments to sync") is enough feedback.
+# =============================================================================
+
+def is_past_due(due_date_str):
+    """
+    Return True if the due date has already passed.
+    
+    Args:
+        due_date_str: ISO 8601 datetime string (e.g., "2026-05-30T23:59:00Z")
+    
+    Returns:
+        bool: True if due_date is earlier than the current UTC time
+    """
+    if not due_date_str:
+        return True  # No due date = treat as past so we don't create broken events
+    
+    # Python's fromisoformat doesn't accept 'Z' directly, so normalize it
+    if due_date_str.endswith("Z"):
+        due_date_str = due_date_str[:-1] + "+00:00"
+    
+    due = datetime.fromisoformat(due_date_str)
+    
+    # If the string had no timezone offset at all, assume UTC (Canvas default)
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    
+    return due < datetime.now(timezone.utc)
+
+
+# In the main loop, we filter the assignments list before creating events:
+# 
+#   future_assignments = [
+#       a for a in assignments if not is_past_due(a.get("due_at", ""))
+#   ]
+#   for assignment in future_assignments:
+#       create_calendar_event(service, assignment)
+#
+# This guarantees the calendar only contains upcoming deadlines.
