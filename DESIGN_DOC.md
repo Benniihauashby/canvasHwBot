@@ -336,3 +336,87 @@ def is_past_due(due_date_str):
 #       create_calendar_event(service, assignment)
 #
 # This guarantees the calendar only contains upcoming deadlines.
+
+# =============================================================================
+# Feature 3: Deduplication — Skip Already-Synced Assignments
+# =============================================================================
+#
+# Motivation:
+#   Without deduplication, every run of ./canvas_bot creates brand-new calendar
+#   events.  After a week of daily syncing you'd have 7 copies of every deadline.
+#   We need a way to recognize that an assignment has already been uploaded.
+#
+# Design Decision:
+#   We use Google Calendar's extendedProperties (private metadata) to store the
+#   Canvas assignment ID inside each event.  On subsequent runs we query the
+#   calendar for events that carry that ID.  If one exists, we skip it.
+#
+# Why extendedProperties instead of title-matching?
+#   - Titles can change (professors rename assignments all the time)
+#   - Canvas assignment IDs are stable numeric identifiers
+#   - Searching by title requires fetching many events and doing string compares
+#
+# Why private (not shared) extendedProperties?
+#   - The Canvas ID is an internal implementation detail
+#   - Private properties are invisible to other apps and calendar guests
+#
+# What if the user manually deletes the event?
+#   - The query returns zero results, so we recreate it on the next run.
+#   - This is the desired behavior: if the user removed it, they probably want
+#     it back unless they explicitly don't.
+#
+# What if the due date changes?
+#   - For now we skip (don't update).  The update logic can be added later by
+#     replacing the 'continue' with an events().update() call.
+#
+# Implementation:
+#   1. Preserve the Canvas assignment 'id' when loading the temp JSON file
+#   2. Before calling events().insert(), call events().list() with:
+#        privateExtendedProperty = "canvasAssignmentId=<id>"
+#   3. If the list returns any items, print a skip message and continue
+#   4. Otherwise, create the event and embed the ID in extendedProperties
+# =============================================================================
+
+def assignment_exists(service, assignment_id):
+    """
+    Check whether a calendar event tied to this Canvas assignment ID already exists.
+
+    Args:
+        service: Google Calendar API service object
+        assignment_id: The Canvas assignment ID (integer or string)
+
+    Returns:
+        bool: True if at least one matching event is found, False otherwise
+    """
+    if not assignment_id:
+        return False
+    try:
+        events_result = service.events().list(
+            calendarId="primary",
+            privateExtendedProperty=f"canvasAssignmentId={assignment_id}"
+        ).execute()
+        return len(events_result.get("items", [])) > 0
+    except HttpError:
+        # If the API call fails, assume the event doesn't exist so we don't
+        # silently lose data.
+        return False
+
+
+# When constructing the event, we add the extendedProperties field:
+#
+#   event = {
+#       ...  # summary, description, start, end, reminders
+#       "extendedProperties": {
+#           "private": {
+#               "canvasAssignmentId": str(assignment.get("id", ""))
+#           }
+#       },
+#   }
+#
+# And in the main loop:
+#
+#   for assignment in future_assignments:
+#       if assignment_exists(service, assignment.get("id")):
+#           print(f"Skipping '{assignment['title']}' (already synced)")
+#           continue
+#       add_assignment_to_calendar(service, assignment)

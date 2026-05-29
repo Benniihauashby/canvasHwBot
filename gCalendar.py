@@ -66,12 +66,32 @@ def load_assignments_from_file(file_path):
     for item in data:
         mapped.append(
             {
+                "id": item.get("id"),
                 "title": item.get("name", "Untitled Assignment"),
                 "description": item.get("description", "No description provided."),
                 "due_date": item.get("due_at", ""),
             }
         )
     return mapped
+
+
+def assignment_exists(service, assignment_id):
+    """Return True if a calendar event with this Canvas assignment ID already exists.
+
+    We embed the Canvas assignment ID in the event's private extendedProperties.
+    This lets us query Google Calendar directly instead of searching by title,
+    which would break if the assignment name changes.
+    """
+    if not assignment_id:
+        return False
+    try:
+        events_result = service.events().list(
+            calendarId="primary",
+            privateExtendedProperty=f"canvasAssignmentId={assignment_id}"
+        ).execute()
+        return len(events_result.get("items", [])) > 0
+    except HttpError:
+        return False
 
 
 def add_assignment_to_calendar(service, assignment):
@@ -101,6 +121,12 @@ def add_assignment_to_calendar(service, assignment):
                 {"method": "popup", "minutes": 24 * 60},  # 1 day before
                 {"method": "popup", "minutes": 60},  # 1 hour before
             ],
+        },
+        # Feature 3: embed the Canvas assignment ID so we can detect duplicates later.
+        "extendedProperties": {
+            "private": {
+                "canvasAssignmentId": str(assignment.get("id", ""))
+            }
         },
     }
 
@@ -141,6 +167,10 @@ def main():
 
     print(f"Found {len(future_assignments)} future assignment(s) to sync...")
     for assignment in future_assignments:
+        # Feature 3: skip if this assignment is already on the calendar.
+        if assignment_exists(service, assignment.get("id")):
+            print(f"Skipping '{assignment['title']}' (already synced)")
+            continue
         add_assignment_to_calendar(service, assignment)
 
 
