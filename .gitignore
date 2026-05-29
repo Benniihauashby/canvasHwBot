@@ -1,0 +1,17 @@
+# --- Credentials & tokens (NEVER commit these) ---
+credentials.json
+token.json
+
+# --- Python environments ---
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# --- macOS / editor noise ---
+.DS_Store
+.vscode/settings.json
+
+# --- Build artifacts ---
+canvas_bot
+*.o
