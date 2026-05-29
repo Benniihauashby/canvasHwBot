@@ -58,20 +58,24 @@ def load_assignments_from_file(file_path):
 
 def add_assignment_to_calendar(service, assignment):
     """Maps assignment data to a Google Calendar event structure and uploads it."""
-    # Google Calendar expects dates in ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
-    # If assignments are all-day, use 'date'. If they have a specific time, use 'dateTime'.
+    # Google Calendar expects dates in ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+    # The Mockoon data comes in as UTC (e.g., '2026-06-01T23:59:00Z'), which converts to
+    # 4:59 PM Pacific.  We strip the 'Z' suffix and set the timezone to America/Los_Angeles
+    # so the wall-clock time shown in the calendar matches the local deadline.
+    due_raw = assignment.get("due_date", "")
+    if due_raw.endswith("Z"):
+        due_raw = due_raw[:-1]
+
     event = {
         "summary": assignment.get("title", "New Assignment"),
         "description": assignment.get("description", "No description provided."),
         "start": {
-            "dateTime": assignment.get("due_date"),  # e.g., '2026-06-01T23:59:00Z'
-            "timeZone": "UTC",
+            "dateTime": due_raw,
+            "timeZone": "America/Los_Angeles",
         },
         "end": {
-            "dateTime": assignment.get(
-                "due_date"
-            ),  # For deadlines, start time usually equals end time
-            "timeZone": "UTC",
+            "dateTime": due_raw,
+            "timeZone": "America/Los_Angeles",
         },
         "reminders": {
             "useDefault": False,
