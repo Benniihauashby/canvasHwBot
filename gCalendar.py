@@ -37,12 +37,11 @@ def get_calendar_service():
 
 
 def is_past_due(due_date_str):
-    """Return True if the due date is earlier than right now.
+    """Return True if the due date is before today (midnight UTC).
 
-    Canvas (and our Mockoon mock) returns ISO 8601 strings.
-    We normalize 'Z' to +00:00, parse with fromisoformat(), and assume
-    UTC if no timezone is present.  This lets us compare cleanly against
-    datetime.now(timezone.utc) without worrying about DST.
+    We treat assignments due TODAY as still active — even if the current
+    time is 3 PM and the deadline is 6 PM.  Only assignments from
+    yesterday or earlier are considered past-due and skipped.
     """
     if not due_date_str:
         return True
@@ -51,7 +50,10 @@ def is_past_due(due_date_str):
     due = datetime.fromisoformat(due_date_str)
     if due.tzinfo is None:
         due = due.replace(tzinfo=timezone.utc)
-    return due < datetime.now(timezone.utc)
+    start_of_today = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return due < start_of_today
 
 
 def load_assignments_from_file(file_path):
