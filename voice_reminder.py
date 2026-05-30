@@ -191,6 +191,13 @@ def main():
         assignments = json.load(f)
 
     state = load_state()
+
+    # Auto-cleanup: purge state entries for assignments that no longer exist
+    # in the current temp file.  This prevents stale memory from blocking
+    # reminders when assignment IDs are reused or data changes.
+    current_ids = {str(item.get("id")) for item in assignments if item.get("id")}
+    state = {k: v for k, v in state.items() if k in current_ids}
+
     now = datetime.now(timezone.utc)
     reminded_count = 0
 

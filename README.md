@@ -105,3 +105,11 @@ crontab -e
 - Switch from Mockoon to the real Canvas API (auth code is already written and commented out)
 - Update existing calendar events when due dates change
 - Add course filtering so users can sync only specific classes
+
+
+
+<!-- Main 4 features -->
+# 1. google calendar pipeline
+# 2. past-due filtering
+# 3. deduplication
+# 4. voice reminders
