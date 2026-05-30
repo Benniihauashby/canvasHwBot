@@ -1,6 +1,11 @@
 # --- Credentials & tokens (NEVER commit these) ---
 credentials.json
 token.json
+.env
+
+# --- Voice reminder artifacts ---
+reminder_state.json
+*.mp3
 
 # --- Python environments ---
 venv/

@@ -82,6 +82,16 @@ int main() {
               << " assignment(s) to temp file: " << tempPath << std::endl;
 
     // ------------------------------------------------------------------
+    // Feature 4 support: stable symlink for voice reminders
+    // ------------------------------------------------------------------
+    // voice_reminder.py runs on its own schedule (cron) and needs a fixed
+    // path to read the latest assignments.  We create a symlink that always
+    // points to the most recent temp file, then overwrite it on every run.
+    // ------------------------------------------------------------------
+    std::string symlinkCmd = "ln -sf " + tempPath + " /tmp/canvas_assignments_latest.json";
+    std::system(symlinkCmd.c_str());
+
+    // ------------------------------------------------------------------
     // Feature 1 (continued): Spawn the Python Google Calendar sync script
     // ------------------------------------------------------------------
     // std::system() invokes the command through the default shell (/bin/sh).

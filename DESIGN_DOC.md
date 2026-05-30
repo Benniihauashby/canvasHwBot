@@ -420,3 +420,44 @@ def assignment_exists(service, assignment_id):
 #           print(f"Skipping '{assignment['title']}' (already synced)")
 #           continue
 #       add_assignment_to_calendar(service, assignment)
+
+# =============================================================================
+# Feature 4: Voice Reminders via ElevenLabs TTS
+# =============================================================================
+#
+# Motivation:
+#   Calendar events are easy to ignore.  A human-like voice yelling at you
+#   through your laptop speakers is much harder to dismiss.  This feature
+#   nags the user at configurable intervals as deadlines approach.
+#
+# Architecture:
+#   - C++ writes a STABLE symlink (/tmp/canvas_assignments_latest.json)
+#     in addition to the unique PID-based temp file.
+#   - A standalone Python script (voice_reminder.py) reads that symlink.
+#   - The script is scheduled to run every 15 minutes via cron.
+#   - It uses ElevenLabs API to generate realistic speech audio.
+#   - Audio is played with macOS built-in afplay.
+#
+# Why a separate script instead of bundling into gCalendar.py?
+#   - gCalendar.py only runs when the user manually executes ./canvas_bot.
+#   - Voice reminders need to fire throughout the day on a fixed schedule.
+#   - Separating concerns keeps the calendar sync code clean.
+#
+# Modes:
+#   off      → no voice output
+#   gentle   → remind once when entering each bucket (24h, 4h, 1h)
+#   moderate → gentle + every 15 min inside the current bucket
+#   annoying → gentle + every 5 min inside the current bucket
+#
+# State Tracking:
+#   reminder_state.json tracks the last bucket and last reminder time for
+#   each assignment ID.  This prevents infinite repetition.
+#
+# Secret Management:
+#   ElevenLabs API key lives in .env (gitignored).
+#   .env.example is committed as a template.
+#   This pattern will be reused for the Canvas API token later.
+#
+# Scheduling (cron):
+#   */15 * * * * cd /path/to/project && source venv/bin/activate && python voice_reminder.py >> /tmp/voice_reminder.log 2>&1
+# =============================================================================
